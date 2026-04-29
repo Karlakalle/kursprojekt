@@ -118,7 +118,7 @@ export default function CoursePage() {
   };
 
   const handleHoleInfo = () => {
-    Alert.alert("TBD", "Hole Info feature coming soon");
+    router.push(`/holes/${encodeURIComponent(course.name)}`);
   };
 
   const handleHistory = () => {
