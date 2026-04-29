@@ -8,7 +8,7 @@ import {
   Alert,
   ScrollView,
 } from "react-native";
-import { useRouter, useLocalSearchParams } from "expo-router";
+import { useRouter, useLocalSearchParams, useNavigation } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { getCourse, saveCourse, updateCourse } from "../../database/database";
 
@@ -20,6 +20,8 @@ export default function CoursePage() {
   const [editedCourse, setEditedCourse] = useState({});
   const isNew = name === "new";
   const [error, setError] = useState(null);
+
+  const navigation = useNavigation();
 
   useEffect(() => {
     if (isNew) {
@@ -60,6 +62,17 @@ export default function CoursePage() {
     }
   }, [name]);
 
+  useEffect(() => {
+    const unsubscribe = navigation.addListener("beforeRemove", (e) => {
+      if (isEditing && !isNew) {
+        e.preventDefault(); // block the navigation
+        setEditedCourse(course); // discard changes
+        setIsEditing(false); // return to view mode
+      }
+    });
+    return unsubscribe;
+  }, [isEditing, isNew, course, navigation]);
+
   const handleEdit = () => {
     setIsEditing(true);
   };
@@ -83,8 +96,25 @@ export default function CoursePage() {
     }
   };
 
+  /*
   const handleBack = () => {
     router.back();
+  };
+  */
+
+  /*
+  const handleBack = () => {
+    if (isEditing && !isNew) {
+      setEditedCourse(course);
+      setIsEditing(false);
+    } else {
+      router.back();
+    }
+  };
+  */
+
+  const handleStart = () => {
+    Alert.alert("TBD", "Start feature coming soon");
   };
 
   const handleHoleInfo = () => {
@@ -95,11 +125,24 @@ export default function CoursePage() {
     Alert.alert("TBD", "History feature coming soon");
   };
 
+  /*
   if (error) {
     return (
       <SafeAreaView style={styles.container}>
         <Text style={styles.errorText}>{error}</Text>
         <TouchableOpacity style={styles.button} onPress={handleBack}>
+          <Text style={styles.buttonText}>Back</Text>
+        </TouchableOpacity>
+      </SafeAreaView>
+    );
+  }
+*/
+
+  if (error) {
+    return (
+      <SafeAreaView style={styles.container}>
+        <Text style={styles.errorText}>{error}</Text>
+        <TouchableOpacity style={styles.button} onPress={() => router.back()}>
           <Text style={styles.buttonText}>Back</Text>
         </TouchableOpacity>
       </SafeAreaView>
@@ -179,6 +222,9 @@ export default function CoursePage() {
             <TouchableOpacity style={styles.button} onPress={handleHistory}>
               <Text style={styles.buttonText}>History</Text>
             </TouchableOpacity>
+            <TouchableOpacity style={styles.button} onPress={handleStart}>
+              <Text style={styles.buttonText}>Start</Text>
+            </TouchableOpacity>
           </>
         )}
         <TouchableOpacity
@@ -190,9 +236,6 @@ export default function CoursePage() {
           disabled={isEditing && !editedCourse.name}
         >
           <Text style={styles.buttonText}>{isEditing ? "Done" : "Edit"}</Text>
-        </TouchableOpacity>
-        <TouchableOpacity style={styles.button} onPress={handleBack}>
-          <Text style={styles.buttonText}>Back</Text>
         </TouchableOpacity>
       </View>
     </SafeAreaView>
