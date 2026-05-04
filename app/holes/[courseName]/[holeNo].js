@@ -7,6 +7,8 @@ import {
   TouchableOpacity,
   Alert,
   ScrollView,
+  KeyboardAvoidingView,
+  Platform,
 } from "react-native";
 import { useRouter, useLocalSearchParams, useNavigation } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -163,35 +165,44 @@ export default function HolePage() {
 
   return (
     <SafeAreaView style={styles.container}>
-      <ScrollView contentContainerStyle={styles.scrollContent}>
-        {editField("No.", "hole_no", { numeric: true })}
-        {editField("Name", "name")}
-        {editField("Distance (m)", "distance", { numeric: true })}
-        {editField("Par", "par", { numeric: true })}
-        {field(
-          "Par +/-",
-          hole.par_plus_minus != null
-            ? parseFloat(hole.par_plus_minus).toFixed(1)
-            : "—",
-        )}
-        {field("Start", `${hole.lat_start}, ${hole.lon_start}`)}
-        {field("Finish", `${hole.lat_finish}, ${hole.lon_finish}`)}
-        {field("Est. Duration", hole.estimated_duration)}
-        {editField("Description", "description", {
-          maxLength: 250,
-          multiline: true,
-        })}
-      </ScrollView>
-
-      <View style={styles.buttonContainer}>
-        <TouchableOpacity
-          style={[styles.button, isDoneDisabled ? styles.disabledButton : {}]}
-          onPress={isEditing ? handleDone : () => setIsEditing(true)}
-          disabled={isDoneDisabled}
+      <KeyboardAvoidingView
+        style={styles.container}
+        behavior={Platform.OS === "ios" ? "padding" : "height"}
+        keyboardVerticalOffset={Platform.OS === "ios" ? 0 : 24}
+      >
+        <ScrollView
+          contentContainerStyle={styles.scrollContent}
+          keyboardShouldPersistTaps="handled"
         >
-          <Text style={styles.buttonText}>{isEditing ? "Done" : "Edit"}</Text>
-        </TouchableOpacity>
-      </View>
+          {editField("No.", "hole_no", { numeric: true })}
+          {editField("Name", "name")}
+          {editField("Distance (m)", "distance", { numeric: true })}
+          {editField("Par", "par", { numeric: true })}
+          {field(
+            "Par +/-",
+            hole.par_plus_minus != null
+              ? parseFloat(hole.par_plus_minus).toFixed(1)
+              : "—",
+          )}
+          {field("Start", `${hole.lat_start}, ${hole.lon_start}`)}
+          {field("Finish", `${hole.lat_finish}, ${hole.lon_finish}`)}
+          {field("Est. Duration", hole.estimated_duration)}
+          {editField("Description", "description", {
+            maxLength: 250,
+            multiline: true,
+          })}
+        </ScrollView>
+
+        <View style={styles.buttonContainer}>
+          <TouchableOpacity
+            style={[styles.button, isDoneDisabled ? styles.disabledButton : {}]}
+            onPress={isEditing ? handleDone : () => setIsEditing(true)}
+            disabled={isDoneDisabled}
+          >
+            <Text style={styles.buttonText}>{isEditing ? "Done" : "Edit"}</Text>
+          </TouchableOpacity>
+        </View>
+      </KeyboardAvoidingView>
     </SafeAreaView>
   );
 }
