@@ -8,13 +8,17 @@ import {
 } from "react-native";
 import { useRouter, useLocalSearchParams } from "expo-router";
 import { useFocusEffect } from "@react-navigation/native";
-import { SafeAreaView } from "react-native-safe-area-context";
+import {
+  SafeAreaView,
+  useSafeAreaInsets,
+} from "react-native-safe-area-context";
 import { getHoles } from "../../../database/database";
 
 export default function HoleList() {
   const { courseName } = useLocalSearchParams();
   const [holes, setHoles] = useState([]);
   const router = useRouter();
+  const insets = useSafeAreaInsets();
 
   useFocusEffect(
     React.useCallback(() => {
@@ -55,12 +59,19 @@ export default function HoleList() {
         data={holes}
         renderItem={renderHole}
         keyExtractor={(item) => item.hole_no.toString()}
-        contentContainerStyle={styles.list}
+        contentContainerStyle={[
+          styles.list,
+          { paddingBottom: insets.bottom + 40 },
+        ]}
+        style={{ marginBottom: insets.bottom + 40 }}
         ListEmptyComponent={
           <Text style={styles.empty}>No holes added yet.</Text>
         }
       />
-      <TouchableOpacity style={styles.addButton} onPress={handleAddNew}>
+      <TouchableOpacity
+        style={[styles.addButton, { bottom: insets.bottom + 20 }]}
+        onPress={handleAddNew}
+      >
         <Text style={styles.addButtonText}>Add New Hole</Text>
       </TouchableOpacity>
     </SafeAreaView>

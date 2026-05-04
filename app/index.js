@@ -9,12 +9,16 @@ import {
 } from "react-native";
 import { useRouter } from "expo-router";
 import { useFocusEffect } from "@react-navigation/native";
-import { SafeAreaView } from "react-native-safe-area-context";
+import {
+  SafeAreaView,
+  useSafeAreaInsets,
+} from "react-native-safe-area-context";
 import { getCourses, initDatabase } from "../database/database";
 
 export default function CourseList() {
   const [courses, setCourses] = useState([]);
   const router = useRouter();
+  const insets = useSafeAreaInsets();
 
   useFocusEffect(
     React.useCallback(() => {
@@ -51,9 +55,16 @@ export default function CourseList() {
         data={courses}
         renderItem={renderCourse}
         keyExtractor={(item) => item.name}
-        contentContainerStyle={styles.list}
+        contentContainerStyle={[
+          styles.list,
+          { paddingBottom: insets.bottom + 40 },
+        ]}
+        style={{ marginBottom: insets.bottom + 40 }}
       />
-      <TouchableOpacity style={styles.addButton} onPress={handleAddNew}>
+      <TouchableOpacity
+        style={[styles.addButton, { bottom: insets.bottom + 20 }]}
+        onPress={handleAddNew}
+      >
         <Text style={styles.addButtonText}>Add New Course</Text>
       </TouchableOpacity>
     </SafeAreaView>
