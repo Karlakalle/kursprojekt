@@ -12,7 +12,8 @@ export const initDatabase = async () => {
       longitude          REAL,
       holes              INTEGER,
       estimated_duration TEXT,
-      latest_date        TEXT
+      latest_date        TEXT,
+      description        TEXT
     );
     CREATE TABLE IF NOT EXISTS Holes (
       course_name        TEXT,
@@ -31,6 +32,11 @@ export const initDatabase = async () => {
       FOREIGN KEY (course_name) REFERENCES Courses(name)
     );
   `);
+
+  const courseColumns = await db.getAllAsync("PRAGMA table_info(Courses);");
+  if (!courseColumns.some((column) => column.name === "description")) {
+    await db.execAsync("ALTER TABLE Courses ADD COLUMN description TEXT;");
+  }
 };
 
 export const getCourses = async () => {
@@ -51,8 +57,8 @@ export const saveCourse = async (course) => {
   const db = await dbPromise;
   await db.runAsync(
     `INSERT OR REPLACE INTO Courses
-      (name, location, latitude, longitude, holes, estimated_duration, latest_date)
-     VALUES (?, ?, ?, ?, ?, ?, ?);`,
+      (name, location, latitude, longitude, holes, estimated_duration, latest_date, description)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?);`,
     [
       course.name,
       course.location ?? "",
@@ -61,6 +67,7 @@ export const saveCourse = async (course) => {
       course.holes ?? 0,
       course.estimated_duration ?? "",
       course.latest_date ?? new Date().toISOString(),
+      course.description ?? "",
     ],
   );
 };
@@ -70,7 +77,7 @@ export const updateCourse = async (oldName, course) => {
   await db.runAsync(
     `UPDATE Courses
      SET name = ?, location = ?, latitude = ?, longitude = ?,
-         holes = ?, estimated_duration = ?, latest_date = ?
+         holes = ?, estimated_duration = ?, latest_date = ?, description = ?
      WHERE name = ?;`,
     [
       course.name,
@@ -80,6 +87,7 @@ export const updateCourse = async (oldName, course) => {
       course.holes ?? 0,
       course.estimated_duration ?? "",
       course.latest_date ?? new Date().toISOString(),
+      course.description ?? "",
       oldName,
     ],
   );

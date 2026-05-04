@@ -33,6 +33,7 @@ export default function CoursePage() {
         holes: 0,
         estimated_duration: "",
         latest_date: "",
+        description: "",
       });
       setEditedCourse({
         name: "",
@@ -42,6 +43,7 @@ export default function CoursePage() {
         holes: 0,
         estimated_duration: "",
         latest_date: "",
+        description: "",
       });
       setIsEditing(true);
     } else {
@@ -191,6 +193,24 @@ export default function CoursePage() {
         </View>
 
         <View style={styles.field}>
+          <Text style={styles.label}>Description:</Text>
+          {isEditing ? (
+            <TextInput
+              style={[styles.input, styles.multilineInput]}
+              value={editedCourse.description}
+              onChangeText={(text) =>
+                setEditedCourse({ ...editedCourse, description: text })
+              }
+              multiline
+              numberOfLines={4}
+              textAlignVertical="top"
+            />
+          ) : (
+            <Text style={styles.value}>{course.description ?? "—"}</Text>
+          )}
+        </View>
+
+        <View style={styles.field}>
           <Text style={styles.label}>Geo Location:</Text>
           <Text style={styles.value}>
             {course.latitude}, {course.longitude}
@@ -266,6 +286,10 @@ const styles = StyleSheet.create({
     borderColor: "#ccc",
     padding: 8,
     fontSize: 16,
+  },
+  multilineInput: {
+    minHeight: 100,
+    textAlignVertical: "top",
   },
   buttonContainer: {
     flexDirection: "row",
