@@ -38,10 +38,6 @@ export const initDatabase = async () => {
       round_no           INTEGER CHECK (round_no >= 0),
       start_time         TEXT,
       end_time           TEXT,
-      lat_start          REAL,
-      lon_start          REAL,
-      lat_finish         REAL,
-      lon_finish         REAL,
       total_throws       INTEGER,
       full_round         INTEGER,
       aborted            INTEGER,
@@ -93,23 +89,20 @@ export const initDatabase = async () => {
     await db.execAsync("ALTER TABLE Courses ADD COLUMN description TEXT;");
   }
 
-  // Migration: add Rounds table if missing (for existing installs)
-  const tables = await db.getAllAsync(
+  // Migration: add Rounds table if missing
+  const roundsTables = await db.getAllAsync(
     "SELECT name FROM sqlite_master WHERE type='table' AND name='Rounds';",
   );
-  if (tables.length === 0) {
+  if (roundsTables.length === 0) {
     await db.execAsync(`
       CREATE TABLE Rounds (
         course_name        TEXT,
         round_no           INTEGER CHECK (round_no >= 0),
         start_time         TEXT,
         end_time           TEXT,
-        lat_start          REAL,
-        lon_start          REAL,
-        lat_finish         REAL,
-        lon_finish         REAL,
         total_throws       INTEGER,
         full_round         INTEGER,
+        aborted            INTEGER,
         PRIMARY KEY (course_name, round_no),
         FOREIGN KEY (course_name) REFERENCES Courses(name)
       );
@@ -143,6 +136,7 @@ export const initDatabase = async () => {
         lon_finish         REAL,
         throws             INTEGER,
         aborted            INTEGER,
+        hole_scored        INTEGER,
         PRIMARY KEY (course_name, round_no, order_no),
         FOREIGN KEY (course_name) REFERENCES Courses(name),
         FOREIGN KEY (course_name, round_no) REFERENCES Rounds(course_name, round_no),
@@ -313,6 +307,15 @@ export const updateHole = async (courseName, oldHoleNo, hole) => {
   );
 };
 
+export const getHoleQty = async (courseName) => {
+  const db = await dbPromise;
+  const result = await db.getFirstAsync(
+    "SELECT MAX(hole_no) AS max_hole FROM Holes WHERE course_name = ?;",
+    [courseName],
+  );
+  return result?.max_hole ?? 0;
+};
+
 //==============================================
 //   Rounds
 //==============================================
@@ -345,21 +348,16 @@ export const saveRound = async (round) => {
   const db = await dbPromise;
   await db.runAsync(
     `INSERT OR REPLACE INTO Rounds
-      (course_name, round_no, start_time, end_time,
-       lat_start, lon_start, lat_finish, lon_finish,
-       total_throws, full_round)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`,
+      (course_name, round_no, start_time, end_time, total_throws, full_round, aborted)
+     VALUES (?, ?, ?, ?, ?, ?, ?);`,
     [
       round.course_name,
       round.round_no,
       round.start_time ?? new Date().toISOString(),
       round.end_time ?? null,
-      round.lat_start ?? 0,
-      round.lon_start ?? 0,
-      round.lat_finish ?? 0,
-      round.lon_finish ?? 0,
       round.total_throws ?? 0,
       round.full_round ? 1 : 0,
+      round.aborted ? 1 : 0,
     ],
   );
 };
@@ -368,19 +366,14 @@ export const updateRound = async (courseName, roundNo, round) => {
   const db = await dbPromise;
   await db.runAsync(
     `UPDATE Rounds
-     SET start_time = ?, end_time = ?,
-         lat_start = ?, lon_start = ?, lat_finish = ?, lon_finish = ?,
-         total_throws = ?, full_round = ?
+     SET start_time = ?, end_time = ?, total_throws = ?, full_round = ?, aborted = ?
      WHERE course_name = ? AND round_no = ?;`,
     [
       round.start_time ?? new Date().toISOString(),
       round.end_time ?? null,
-      round.lat_start ?? 0,
-      round.lon_start ?? 0,
-      round.lat_finish ?? 0,
-      round.lon_finish ?? 0,
       round.total_throws ?? 0,
       round.full_round ? 1 : 0,
+      round.aborted ? 1 : 0,
       courseName,
       roundNo,
     ],
@@ -393,6 +386,36 @@ export const deleteRound = async (courseName, roundNo) => {
     "DELETE FROM Rounds WHERE course_name = ? AND round_no = ?;",
     [courseName, roundNo],
   );
+};
+
+export const getLatestDate = async (courseName) => {
+  const db = await dbPromise;
+  const result = await db.getFirstAsync(
+    "SELECT MAX(end_time) AS latest FROM Rounds WHERE course_name = ?;",
+    [courseName],
+  );
+  if (!result?.latest) return null;
+  return new Date(result.latest).toLocaleDateString();
+};
+
+export const getMeanDuration = async (courseName) => {
+  const db = await dbPromise;
+  const results = await db.getAllAsync(
+    "SELECT start_time, end_time FROM Rounds WHERE course_name = ? AND full_round = 1 AND start_time IS NOT NULL AND end_time IS NOT NULL;",
+    [courseName],
+  );
+  if (!results || results.length === 0) return null;
+  const totalMs = results.reduce((sum, row) => {
+    const diff = new Date(row.end_time) - new Date(row.start_time);
+    return sum + diff;
+  }, 0);
+  const meanMs = totalMs / results.length;
+  const totalMinutes = Math.floor(meanMs / 60000);
+  const hours = Math.floor(totalMinutes / 60)
+    .toString()
+    .padStart(2, "0");
+  const minutes = (totalMinutes % 60).toString().padStart(2, "0");
+  return `${hours}:${minutes}`;
 };
 
 //==============================================
@@ -430,8 +453,8 @@ export const saveHolePerRound = async (holePerRound) => {
       (course_name, round_no, order_no, hole_no,
        start_time, end_time,
        lat_start, lon_start, lat_finish, lon_finish,
-       throws, aborted)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`,
+       throws, aborted, hole_scored)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`,
     [
       holePerRound.course_name,
       holePerRound.round_no,
@@ -445,6 +468,7 @@ export const saveHolePerRound = async (holePerRound) => {
       holePerRound.lon_finish ?? 0,
       holePerRound.throws ?? 0,
       holePerRound.aborted ? 1 : 0,
+      holePerRound.hole_scored ? 1 : 0,
     ],
   );
 };
@@ -460,7 +484,7 @@ export const updateHolePerRound = async (
     `UPDATE HolesPerRound
      SET hole_no = ?, start_time = ?, end_time = ?,
          lat_start = ?, lon_start = ?, lat_finish = ?, lon_finish = ?,
-         throws = ?, aborted = ?
+         throws = ?, aborted = ?, hole_scored = ?
      WHERE course_name = ? AND round_no = ? AND order_no = ?;`,
     [
       holePerRound.hole_no,
@@ -472,6 +496,7 @@ export const updateHolePerRound = async (
       holePerRound.lon_finish ?? 0,
       holePerRound.throws ?? 0,
       holePerRound.aborted ? 1 : 0,
+      holePerRound.hole_scored ? 1 : 0,
       courseName,
       roundNo,
       orderNo,

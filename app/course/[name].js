@@ -12,7 +12,15 @@ import {
 } from "react-native";
 import { useRouter, useLocalSearchParams, useNavigation } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { getCourse, saveCourse, updateCourse } from "../../database/database";
+import {
+  getCourse,
+  saveCourse,
+  updateCourse,
+  getHoleQty,
+  getLatestDate,
+  getMeanDuration,
+} from "../../database/database";
+import * as Location from "expo-location";
 
 export default function CoursePage() {
   const { name } = useLocalSearchParams();
@@ -22,6 +30,9 @@ export default function CoursePage() {
   const [editedCourse, setEditedCourse] = useState({});
   const isNew = name === "new";
   const [error, setError] = useState(null);
+  const [holeQty, setHoleQty] = useState(0);
+  const [latestDate, setLatestDate] = useState(null);
+  const [meanDuration, setMeanDuration] = useState(null);
 
   const navigation = useNavigation();
 
@@ -58,6 +69,12 @@ export default function CoursePage() {
           } else {
             setError("Course not found.");
           }
+          const qty = await getHoleQty(decodeURIComponent(name));
+          setHoleQty(qty);
+          const date = await getLatestDate(decodeURIComponent(name));
+          setLatestDate(date);
+          const duration = await getMeanDuration(decodeURIComponent(name));
+          setMeanDuration(duration);
         } catch (e) {
           setError("Failed to load course. Please try again.");
         }
@@ -83,17 +100,23 @@ export default function CoursePage() {
 
   const handleDone = async () => {
     try {
+      const courseToSave = {
+        ...editedCourse,
+        latitude: parseFloat(editedCourse.latitude) || 0,
+        longitude: parseFloat(editedCourse.longitude) || 0,
+        holes: parseInt(editedCourse.holes) || 0,
+      };
       if (isNew) {
-        await saveCourse(editedCourse);
+        await saveCourse(courseToSave);
       } else {
-        await updateCourse(course.name, editedCourse);
+        await updateCourse(course.name, courseToSave);
       }
-      setCourse(editedCourse);
+      setCourse(courseToSave);
       setIsEditing(false);
       if (isNew) {
         router.replace("/");
       } else {
-        router.replace(`/course/${encodeURIComponent(editedCourse.name)}`);
+        router.replace(`/course/${encodeURIComponent(courseToSave.name)}`);
       }
     } catch (e) {
       Alert.alert("Error", "Failed to save course");
@@ -129,6 +152,29 @@ export default function CoursePage() {
     Alert.alert("TBD", "History feature coming soon");
   };
 
+  const handleStoreGeo = async () => {
+    try {
+      const { status } = await Location.requestForegroundPermissionsAsync();
+      if (status !== "granted") {
+        Alert.alert(
+          "Permission Denied",
+          "Location permission is required to store geo position.",
+        );
+        return;
+      }
+      const location = await Location.getCurrentPositionAsync({
+        accuracy: Location.Accuracy.BestForNavigation,
+      });
+      setEditedCourse((prev) => ({
+        ...prev,
+        latitude: location.coords.latitude,
+        longitude: location.coords.longitude,
+      }));
+    } catch (e) {
+      Alert.alert("Error", "Failed to get geo position.");
+    }
+  };
+
   /*
   if (error) {
     return (
@@ -140,7 +186,7 @@ export default function CoursePage() {
       </SafeAreaView>
     );
   }
-*/
+  */
 
   if (error) {
     return (
@@ -215,23 +261,25 @@ export default function CoursePage() {
         <View style={styles.field}>
           <Text style={styles.label}>Geo Location:</Text>
           <Text style={styles.value}>
-            {course.latitude}, {course.longitude}
+            {isEditing
+              ? `${editedCourse.latitude}, ${editedCourse.longitude}`
+              : `${course.latitude}, ${course.longitude}`}
           </Text>
         </View>
 
         <View style={styles.field}>
           <Text style={styles.label}>Holes:</Text>
-          <Text style={styles.value}>{course.holes}</Text>
+          <Text style={styles.value}>{holeQty}</Text>
         </View>
 
         <View style={styles.field}>
           <Text style={styles.label}>Estimated Duration:</Text>
-          <Text style={styles.value}>{course.estimated_duration}</Text>
+          <Text style={styles.value}>{meanDuration ?? "—"}</Text>
         </View>
 
         <View style={styles.field}>
           <Text style={styles.label}>Latest Date:</Text>
-          <Text style={styles.value}>{course.latest_date}</Text>
+          <Text style={styles.value}>{latestDate ?? "—"}</Text>
         </View>
       </ScrollView>
 
@@ -248,6 +296,11 @@ export default function CoursePage() {
               <Text style={styles.buttonText}>Start</Text>
             </TouchableOpacity>
           </>
+        )}
+        {isEditing && (
+          <TouchableOpacity style={styles.button} onPress={handleStoreGeo}>
+            <Text style={styles.buttonText}>Store Geo</Text>
+          </TouchableOpacity>
         )}
         <TouchableOpacity
           style={[
