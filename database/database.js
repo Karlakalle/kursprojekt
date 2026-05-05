@@ -1,3 +1,5 @@
+//==========> database.js <==========
+
 import * as SQLite from "expo-sqlite";
 
 const dbPromise = SQLite.openDatabaseAsync("discgolf.db");
@@ -10,17 +12,17 @@ export const initDatabase = async () => {
       location           TEXT,
       latitude           REAL,
       longitude          REAL,
-      holes              INTEGER,
+      holes              INTEGER CHECK (holes >= 0),
       estimated_duration TEXT,
       latest_date        TEXT,
       description        TEXT
     );
     CREATE TABLE IF NOT EXISTS Holes (
       course_name        TEXT,
-      hole_no            INTEGER,
+      hole_no            INTEGER CHECK (hole_no >= 0),
       name               TEXT,
       distance           REAL,
-      par                INTEGER,
+      par                INTEGER CHECK (par >= 0),
       par_plus_minus     REAL,
       lat_start          REAL,
       lon_start          REAL,
@@ -31,14 +33,163 @@ export const initDatabase = async () => {
       PRIMARY KEY (course_name, hole_no),
       FOREIGN KEY (course_name) REFERENCES Courses(name)
     );
+    CREATE TABLE IF NOT EXISTS Rounds (
+      course_name        TEXT,
+      round_no           INTEGER CHECK (round_no >= 0),
+      start_time         TEXT,
+      end_time           TEXT,
+      lat_start          REAL,
+      lon_start          REAL,
+      lat_finish         REAL,
+      lon_finish         REAL,
+      total_throws       INTEGER,
+      full_round         INTEGER,
+      aborted            INTEGER,
+      PRIMARY KEY (course_name, round_no),
+      FOREIGN KEY (course_name) REFERENCES Courses(name)
+    );
+    CREATE TABLE IF NOT EXISTS HolesPerRound (
+      course_name        TEXT,
+      round_no           INTEGER,
+      order_no           INTEGER CHECK (order_no >= 0),
+      hole_no            INTEGER,
+      start_time         TEXT,
+      end_time           TEXT,
+      lat_start          REAL,
+      lon_start          REAL,
+      lat_finish         REAL,
+      lon_finish         REAL,
+      throws             INTEGER,
+      aborted            INTEGER,
+      hole_scored        INTEGER,
+      PRIMARY KEY (course_name, round_no, order_no),
+      FOREIGN KEY (course_name) REFERENCES Courses(name),
+      FOREIGN KEY (course_name, round_no) REFERENCES Rounds(course_name, round_no),
+      FOREIGN KEY (course_name, hole_no) REFERENCES Holes(course_name, hole_no)
+    );
+    CREATE TABLE IF NOT EXISTS Throws (
+      course_name        TEXT,
+      round_no           INTEGER,
+      hole_no            INTEGER,
+      order_no           INTEGER,
+      throw_no           INTEGER CHECK (throw_no >= 0),
+      start_time         TEXT,
+      end_time           TEXT,
+      lat_start          REAL,
+      lon_start          REAL,
+      lat_finish         REAL,
+      lon_finish         REAL,
+      PRIMARY KEY (course_name, round_no, hole_no, throw_no),
+      FOREIGN KEY (course_name) REFERENCES Courses(name),
+      FOREIGN KEY (course_name, round_no) REFERENCES Rounds(course_name, round_no),
+      FOREIGN KEY (course_name, hole_no) REFERENCES Holes(course_name, hole_no),
+      FOREIGN KEY (course_name, round_no, order_no) REFERENCES HolesPerRound(course_name, round_no, order_no)
+    );
   `);
 
+  // Migration: add description to Courses if missing
   const courseColumns = await db.getAllAsync("PRAGMA table_info(Courses);");
-  if (!courseColumns.some((column) => column.name === "description")) {
+  if (!courseColumns.some((col) => col.name === "description")) {
     await db.execAsync("ALTER TABLE Courses ADD COLUMN description TEXT;");
+  }
+
+  // Migration: add Rounds table if missing (for existing installs)
+  const tables = await db.getAllAsync(
+    "SELECT name FROM sqlite_master WHERE type='table' AND name='Rounds';",
+  );
+  if (tables.length === 0) {
+    await db.execAsync(`
+      CREATE TABLE Rounds (
+        course_name        TEXT,
+        round_no           INTEGER CHECK (round_no >= 0),
+        start_time         TEXT,
+        end_time           TEXT,
+        lat_start          REAL,
+        lon_start          REAL,
+        lat_finish         REAL,
+        lon_finish         REAL,
+        total_throws       INTEGER,
+        full_round         INTEGER,
+        PRIMARY KEY (course_name, round_no),
+        FOREIGN KEY (course_name) REFERENCES Courses(name)
+      );
+    `);
+  }
+
+  // Migration: add aborted column to Rounds if missing
+  const roundColumns = await db.getAllAsync("PRAGMA table_info(Rounds);");
+  if (!roundColumns.some((col) => col.name === "aborted")) {
+    await db.execAsync(
+      "ALTER TABLE Rounds ADD COLUMN aborted INTEGER DEFAULT 0;",
+    );
+  }
+
+  // Migration: add HolesPerRound table if missing
+  const hprTables = await db.getAllAsync(
+    "SELECT name FROM sqlite_master WHERE type='table' AND name='HolesPerRound';",
+  );
+  if (hprTables.length === 0) {
+    await db.execAsync(`
+      CREATE TABLE HolesPerRound (
+        course_name        TEXT,
+        round_no           INTEGER,
+        order_no           INTEGER CHECK (order_no >= 0),
+        hole_no            INTEGER,
+        start_time         TEXT,
+        end_time           TEXT,
+        lat_start          REAL,
+        lon_start          REAL,
+        lat_finish         REAL,
+        lon_finish         REAL,
+        throws             INTEGER,
+        aborted            INTEGER,
+        PRIMARY KEY (course_name, round_no, order_no),
+        FOREIGN KEY (course_name) REFERENCES Courses(name),
+        FOREIGN KEY (course_name, round_no) REFERENCES Rounds(course_name, round_no),
+        FOREIGN KEY (course_name, hole_no) REFERENCES Holes(course_name, hole_no)
+      );
+    `);
+  }
+
+  // Migration: add hole_scored column to HolesPerRound if missing
+  const hprColumns = await db.getAllAsync("PRAGMA table_info(HolesPerRound);");
+  if (!hprColumns.some((col) => col.name === "hole_scored")) {
+    await db.execAsync(
+      "ALTER TABLE HolesPerRound ADD COLUMN hole_scored INTEGER DEFAULT 0;",
+    );
+  }
+
+  // Migration: add Throws table if missing
+  const throwsTables = await db.getAllAsync(
+    "SELECT name FROM sqlite_master WHERE type='table' AND name='Throws';",
+  );
+  if (throwsTables.length === 0) {
+    await db.execAsync(`
+      CREATE TABLE Throws (
+        course_name        TEXT,
+        round_no           INTEGER,
+        hole_no            INTEGER,
+        order_no           INTEGER,
+        throw_no           INTEGER CHECK (throw_no >= 0),
+        start_time         TEXT,
+        end_time           TEXT,
+        lat_start          REAL,
+        lon_start          REAL,
+        lat_finish         REAL,
+        lon_finish         REAL,
+        PRIMARY KEY (course_name, round_no, hole_no, throw_no),
+        FOREIGN KEY (course_name) REFERENCES Courses(name),
+        FOREIGN KEY (course_name, round_no) REFERENCES Rounds(course_name, round_no),
+        FOREIGN KEY (course_name, hole_no) REFERENCES Holes(course_name, hole_no),
+        FOREIGN KEY (course_name, round_no, order_no) REFERENCES HolesPerRound(course_name, round_no, order_no)
+      );
+    `);
   }
 };
 
+//==============================================
+//   Courses
+//==============================================
 export const getCourses = async () => {
   const db = await dbPromise;
   return await db.getAllAsync(
@@ -93,6 +244,9 @@ export const updateCourse = async (oldName, course) => {
   );
 };
 
+//==============================================
+//   Holes
+//==============================================
 export const getHoles = async (courseName) => {
   const db = await dbPromise;
   return await db.getAllAsync(
@@ -156,5 +310,292 @@ export const updateHole = async (courseName, oldHoleNo, hole) => {
       courseName,
       oldHoleNo,
     ],
+  );
+};
+
+//==============================================
+//   Rounds
+//==============================================
+export const getRounds = async (courseName) => {
+  const db = await dbPromise;
+  return await db.getAllAsync(
+    "SELECT * FROM Rounds WHERE course_name = ? ORDER BY round_no ASC;",
+    [courseName],
+  );
+};
+
+export const getRound = async (courseName, roundNo) => {
+  const db = await dbPromise;
+  return await db.getFirstAsync(
+    "SELECT * FROM Rounds WHERE course_name = ? AND round_no = ?;",
+    [courseName, roundNo],
+  );
+};
+
+export const getNextRoundNo = async (courseName) => {
+  const db = await dbPromise;
+  const result = await db.getFirstAsync(
+    "SELECT MAX(round_no) AS max_no FROM Rounds WHERE course_name = ?;",
+    [courseName],
+  );
+  return (result?.max_no ?? -1) + 1;
+};
+
+export const saveRound = async (round) => {
+  const db = await dbPromise;
+  await db.runAsync(
+    `INSERT OR REPLACE INTO Rounds
+      (course_name, round_no, start_time, end_time,
+       lat_start, lon_start, lat_finish, lon_finish,
+       total_throws, full_round)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`,
+    [
+      round.course_name,
+      round.round_no,
+      round.start_time ?? new Date().toISOString(),
+      round.end_time ?? null,
+      round.lat_start ?? 0,
+      round.lon_start ?? 0,
+      round.lat_finish ?? 0,
+      round.lon_finish ?? 0,
+      round.total_throws ?? 0,
+      round.full_round ? 1 : 0,
+    ],
+  );
+};
+
+export const updateRound = async (courseName, roundNo, round) => {
+  const db = await dbPromise;
+  await db.runAsync(
+    `UPDATE Rounds
+     SET start_time = ?, end_time = ?,
+         lat_start = ?, lon_start = ?, lat_finish = ?, lon_finish = ?,
+         total_throws = ?, full_round = ?
+     WHERE course_name = ? AND round_no = ?;`,
+    [
+      round.start_time ?? new Date().toISOString(),
+      round.end_time ?? null,
+      round.lat_start ?? 0,
+      round.lon_start ?? 0,
+      round.lat_finish ?? 0,
+      round.lon_finish ?? 0,
+      round.total_throws ?? 0,
+      round.full_round ? 1 : 0,
+      courseName,
+      roundNo,
+    ],
+  );
+};
+
+export const deleteRound = async (courseName, roundNo) => {
+  const db = await dbPromise;
+  await db.runAsync(
+    "DELETE FROM Rounds WHERE course_name = ? AND round_no = ?;",
+    [courseName, roundNo],
+  );
+};
+
+//==============================================
+//   HolesPerRound
+//==============================================
+export const getHolesPerRound = async (courseName, roundNo) => {
+  const db = await dbPromise;
+  return await db.getAllAsync(
+    "SELECT * FROM HolesPerRound WHERE course_name = ? AND round_no = ? ORDER BY order_no ASC;",
+    [courseName, roundNo],
+  );
+};
+
+export const getHolePerRound = async (courseName, roundNo, orderNo) => {
+  const db = await dbPromise;
+  return await db.getFirstAsync(
+    "SELECT * FROM HolesPerRound WHERE course_name = ? AND round_no = ? AND order_no = ?;",
+    [courseName, roundNo, orderNo],
+  );
+};
+
+export const getNextOrderNo = async (courseName, roundNo) => {
+  const db = await dbPromise;
+  const result = await db.getFirstAsync(
+    "SELECT MAX(order_no) AS max_no FROM HolesPerRound WHERE course_name = ? AND round_no = ?;",
+    [courseName, roundNo],
+  );
+  return (result?.max_no ?? -1) + 1;
+};
+
+export const saveHolePerRound = async (holePerRound) => {
+  const db = await dbPromise;
+  await db.runAsync(
+    `INSERT OR REPLACE INTO HolesPerRound
+      (course_name, round_no, order_no, hole_no,
+       start_time, end_time,
+       lat_start, lon_start, lat_finish, lon_finish,
+       throws, aborted)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`,
+    [
+      holePerRound.course_name,
+      holePerRound.round_no,
+      holePerRound.order_no,
+      holePerRound.hole_no,
+      holePerRound.start_time ?? new Date().toISOString(),
+      holePerRound.end_time ?? null,
+      holePerRound.lat_start ?? 0,
+      holePerRound.lon_start ?? 0,
+      holePerRound.lat_finish ?? 0,
+      holePerRound.lon_finish ?? 0,
+      holePerRound.throws ?? 0,
+      holePerRound.aborted ? 1 : 0,
+    ],
+  );
+};
+
+export const updateHolePerRound = async (
+  courseName,
+  roundNo,
+  orderNo,
+  holePerRound,
+) => {
+  const db = await dbPromise;
+  await db.runAsync(
+    `UPDATE HolesPerRound
+     SET hole_no = ?, start_time = ?, end_time = ?,
+         lat_start = ?, lon_start = ?, lat_finish = ?, lon_finish = ?,
+         throws = ?, aborted = ?
+     WHERE course_name = ? AND round_no = ? AND order_no = ?;`,
+    [
+      holePerRound.hole_no,
+      holePerRound.start_time ?? new Date().toISOString(),
+      holePerRound.end_time ?? null,
+      holePerRound.lat_start ?? 0,
+      holePerRound.lon_start ?? 0,
+      holePerRound.lat_finish ?? 0,
+      holePerRound.lon_finish ?? 0,
+      holePerRound.throws ?? 0,
+      holePerRound.aborted ? 1 : 0,
+      courseName,
+      roundNo,
+      orderNo,
+    ],
+  );
+};
+
+export const deleteHolePerRound = async (courseName, roundNo, orderNo) => {
+  const db = await dbPromise;
+  await db.runAsync(
+    "DELETE FROM HolesPerRound WHERE course_name = ? AND round_no = ? AND order_no = ?;",
+    [courseName, roundNo, orderNo],
+  );
+};
+
+export const deleteHolesPerRound = async (courseName, roundNo) => {
+  const db = await dbPromise;
+  await db.runAsync(
+    "DELETE FROM HolesPerRound WHERE course_name = ? AND round_no = ?;",
+    [courseName, roundNo],
+  );
+};
+
+//==============================================
+//   Throws
+//==============================================
+export const getThrows = async (courseName, roundNo, holeNo) => {
+  const db = await dbPromise;
+  return await db.getAllAsync(
+    "SELECT * FROM Throws WHERE course_name = ? AND round_no = ? AND hole_no = ? ORDER BY throw_no ASC;",
+    [courseName, roundNo, holeNo],
+  );
+};
+
+export const getThrow = async (courseName, roundNo, holeNo, throwNo) => {
+  const db = await dbPromise;
+  return await db.getFirstAsync(
+    "SELECT * FROM Throws WHERE course_name = ? AND round_no = ? AND hole_no = ? AND throw_no = ?;",
+    [courseName, roundNo, holeNo, throwNo],
+  );
+};
+
+export const getNextThrowNo = async (courseName, roundNo, holeNo) => {
+  const db = await dbPromise;
+  const result = await db.getFirstAsync(
+    "SELECT MAX(throw_no) AS max_no FROM Throws WHERE course_name = ? AND round_no = ? AND hole_no = ?;",
+    [courseName, roundNo, holeNo],
+  );
+  return (result?.max_no ?? -1) + 1;
+};
+
+export const saveThrow = async (throwData) => {
+  const db = await dbPromise;
+  await db.runAsync(
+    `INSERT OR REPLACE INTO Throws
+      (course_name, round_no, hole_no, order_no, throw_no,
+       start_time, end_time,
+       lat_start, lon_start, lat_finish, lon_finish)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`,
+    [
+      throwData.course_name,
+      throwData.round_no,
+      throwData.hole_no,
+      throwData.order_no,
+      throwData.throw_no,
+      throwData.start_time ?? new Date().toISOString(),
+      throwData.end_time ?? null,
+      throwData.lat_start ?? 0,
+      throwData.lon_start ?? 0,
+      throwData.lat_finish ?? 0,
+      throwData.lon_finish ?? 0,
+    ],
+  );
+};
+
+export const updateThrow = async (
+  courseName,
+  roundNo,
+  holeNo,
+  throwNo,
+  throwData,
+) => {
+  const db = await dbPromise;
+  await db.runAsync(
+    `UPDATE Throws
+     SET order_no = ?, start_time = ?, end_time = ?,
+         lat_start = ?, lon_start = ?, lat_finish = ?, lon_finish = ?
+     WHERE course_name = ? AND round_no = ? AND hole_no = ? AND throw_no = ?;`,
+    [
+      throwData.order_no,
+      throwData.start_time ?? new Date().toISOString(),
+      throwData.end_time ?? null,
+      throwData.lat_start ?? 0,
+      throwData.lon_start ?? 0,
+      throwData.lat_finish ?? 0,
+      throwData.lon_finish ?? 0,
+      courseName,
+      roundNo,
+      holeNo,
+      throwNo,
+    ],
+  );
+};
+
+export const deleteThrow = async (courseName, roundNo, holeNo, throwNo) => {
+  const db = await dbPromise;
+  await db.runAsync(
+    "DELETE FROM Throws WHERE course_name = ? AND round_no = ? AND hole_no = ? AND throw_no = ?;",
+    [courseName, roundNo, holeNo, throwNo],
+  );
+};
+
+export const deleteThrowsForHole = async (courseName, roundNo, holeNo) => {
+  const db = await dbPromise;
+  await db.runAsync(
+    "DELETE FROM Throws WHERE course_name = ? AND round_no = ? AND hole_no = ?;",
+    [courseName, roundNo, holeNo],
+  );
+};
+
+export const deleteThrowsForRound = async (courseName, roundNo) => {
+  const db = await dbPromise;
+  await db.runAsync(
+    "DELETE FROM Throws WHERE course_name = ? AND round_no = ?;",
+    [courseName, roundNo],
   );
 };
