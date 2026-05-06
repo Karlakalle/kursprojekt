@@ -9,6 +9,8 @@ import {
   Dimensions,
   PanResponder,
   Alert,
+  Modal,
+  ScrollView,
 } from "react-native";
 import { useRouter, useLocalSearchParams } from "expo-router";
 import { useFocusEffect } from "@react-navigation/native";
@@ -28,8 +30,16 @@ import {
   updateRound,
   getHoleGeo,
   getCourse,
+  getNextOrderNo,
+  getNextThrowNo,
+  saveHolePerRound,
+  saveThrow,
+  getThrows,
+  getRound,
+  getHolePerRoundByHoleNo,
 } from "../../database/database";
 import MapView, { Marker, Polyline } from "react-native-maps";
+import * as Location from "expo-location";
 
 const { height: SCREEN_HEIGHT } = Dimensions.get("window");
 
@@ -48,6 +58,14 @@ export default function ScoringPage() {
   const [lastThrowDistance, setLastThrowDistance] = useState(null);
   const timerRef = useRef(null);
   const [course, setCourse] = useState(null);
+
+  const [throwActive, setThrowActive] = useState(false); // true = waiting for Register
+  const [scrollLocked, setScrollLocked] = useState(false);
+  const [activeOrderNo, setActiveOrderNo] = useState(null);
+  const [activeThrowNo, setActiveThrowNo] = useState(null);
+
+  const [abortModalVisible, setAbortModalVisible] = useState(false);
+  const [abortOptions, setAbortOptions] = useState([]);
 
   useFocusEffect(
     React.useCallback(() => {
@@ -108,13 +126,12 @@ export default function ScoringPage() {
       onMoveShouldSetPanResponder: (_, gestureState) =>
         Math.abs(gestureState.dy) > 10,
       onPanResponderRelease: (_, gestureState) => {
+        if (scrollLocked) return;
         if (gestureState.dy < -30) {
-          // Swipe up → next
           setCurrentIndex((prev) =>
             prev < totalItemsRef.current - 1 ? prev + 1 : prev,
           );
         } else if (gestureState.dy > 30) {
-          // Swipe down → previous
           setCurrentIndex((prev) => (prev > 0 ? prev - 1 : prev));
         }
       },
@@ -188,7 +205,6 @@ export default function ScoringPage() {
         return;
       }
 
-      // Check if scoring is ongoing for current hole
       const ongoing =
         selectedHoleNo > 0
           ? await scoringOngoing(decoded, round.round_no, selectedHoleNo)
@@ -198,12 +214,13 @@ export default function ScoringPage() {
 
       if (ongoing) {
         options.push({
-          text: "Abort hole (mark as aborted)",
+          text: "Abort hole (skip)",
           onPress: async () => {
-            const hpr = await getHolePerRound(
+            setAbortModalVisible(false);
+            const hpr = await getHolePerRoundByHoleNo(
               decoded,
               round.round_no,
-              currentHole?.order_no,
+              selectedHoleNo,
             );
             if (hpr) {
               await updateHolePerRound(decoded, round.round_no, hpr.order_no, {
@@ -212,29 +229,41 @@ export default function ScoringPage() {
                 hole_scored: false,
               });
             }
+            setScrollLocked(false);
+            setThrowActive(false);
+            setThrowCount(0);
             await refreshScoringPage();
           },
         });
         options.push({
-          text: "Abort hole and delete throw data (restart)",
+          text: "Abort hole (restart)",
+          destructive: true,
           onPress: async () => {
+            setAbortModalVisible(false);
             await deleteThrowsForHole(decoded, round.round_no, selectedHoleNo);
-            const hpr = await getHolePerRound(
+            const hpr = await getHolePerRoundByHoleNo(
               decoded,
               round.round_no,
-              currentHole?.order_no,
+              selectedHoleNo,
             );
             if (hpr) {
               await deleteHolePerRound(decoded, round.round_no, hpr.order_no);
             }
+            setScrollLocked(false);
+            setThrowActive(false);
+            setThrowCount(0);
+            setActiveOrderNo(null);
+            setActiveThrowNo(null);
+            setCurrentIndex(0);
             await refreshScoringPage();
           },
         });
       }
 
       options.push({
-        text: "Abort round (mark as aborted)",
+        text: "Abort round (end)",
         onPress: async () => {
+          setAbortModalVisible(false);
           await updateRound(decoded, round.round_no, {
             ...round,
             aborted: true,
@@ -244,9 +273,10 @@ export default function ScoringPage() {
       });
 
       options.push({
-        text: "Abort round and delete round data",
-        style: "destructive",
+        text: "Abort round (delete)",
+        destructive: true,
         onPress: async () => {
+          setAbortModalVisible(false);
           await deleteThrowsForRound(decoded, round.round_no);
           await deleteHolesPerRound(decoded, round.round_no);
           await deleteRound(decoded, round.round_no);
@@ -256,12 +286,95 @@ export default function ScoringPage() {
 
       options.push({
         text: "Return",
-        style: "cancel",
+        cancel: true,
+        onPress: () => setAbortModalVisible(false),
       });
 
-      Alert.alert("Abort", "What would you like to do?", options);
+      setAbortOptions(options);
+      setAbortModalVisible(true);
     } catch (e) {
       Alert.alert("Error", "Something went wrong.");
+      console.error(e);
+    }
+  };
+
+  const handleThrow = async () => {
+    try {
+      // Get current geo position (optional)
+      let lat = 0;
+      let lon = 0;
+      try {
+        const { status } = await Location.requestForegroundPermissionsAsync();
+        if (status === "granted") {
+          const pos = await Location.getCurrentPositionAsync({
+            accuracy: Location.Accuracy.BestForNavigation,
+          });
+          lat = pos.coords.latitude;
+          lon = pos.coords.longitude;
+        }
+      } catch (e) {
+        // Geo not available, continue without it
+      }
+
+      const now = new Date().toISOString();
+      const existingThrows = await getThrows(
+        decoded,
+        round.round_no,
+        selectedHoleNo,
+      );
+      const isFirstThrow = existingThrows.length === 0;
+
+      let orderNo = activeOrderNo;
+
+      if (isFirstThrow) {
+        // Create HolesPerRound record
+        orderNo = await getNextOrderNo(decoded, round.round_no);
+        await saveHolePerRound({
+          course_name: decoded,
+          round_no: round.round_no,
+          order_no: orderNo,
+          hole_no: selectedHoleNo,
+          start_time: now,
+          lat_start: lat,
+          lon_start: lon,
+          aborted: false,
+          hole_scored: false,
+        });
+        setActiveOrderNo(orderNo);
+
+        // Update Rounds start_time if not set
+        const currentRound = await getRound(decoded, round.round_no);
+        if (!currentRound.start_time) {
+          await updateRound(decoded, round.round_no, {
+            ...currentRound,
+            start_time: now,
+          });
+          setRound({ ...round, start_time: now });
+        }
+      }
+
+      // Create Throw record
+      const throwNo = await getNextThrowNo(
+        decoded,
+        round.round_no,
+        selectedHoleNo,
+      );
+      await saveThrow({
+        course_name: decoded,
+        round_no: round.round_no,
+        hole_no: selectedHoleNo,
+        order_no: orderNo,
+        throw_no: throwNo,
+        start_time: now,
+        lat_start: lat,
+        lon_start: lon,
+      });
+      setActiveThrowNo(throwNo);
+      setThrowActive(true);
+      setScrollLocked(true);
+      setThrowCount((prev) => prev + 1);
+    } catch (e) {
+      Alert.alert("Error", "Failed to register throw.");
       console.error(e);
     }
   };
@@ -274,7 +387,13 @@ export default function ScoringPage() {
           {decoded} — Round {round?.round_no ?? "…"}
         </Text>
         <Text style={styles.headerLine2}>Next Hole</Text>
-        <View style={styles.cardContainer} {...panResponder.panHandlers}>
+        <View
+          style={[
+            styles.cardContainer,
+            scrollLocked ? styles.cardContainerLocked : {},
+          ]}
+          {...panResponder.panHandlers}
+        >
           {renderHoleCard()}
         </View>
       </View>
@@ -368,18 +487,58 @@ export default function ScoringPage() {
           <Text style={styles.buttonText}>Abort</Text>
         </TouchableOpacity>
         <TouchableOpacity
-          style={styles.button}
-          onPress={() => Alert.alert("TBD", "Coming soon")}
+          style={[styles.button, throwActive ? styles.disabledButton : {}]}
+          onPress={throwActive ? null : handleThrow}
+          disabled={throwActive}
         >
           <Text style={styles.buttonText}>Throw</Text>
         </TouchableOpacity>
         <TouchableOpacity
-          style={styles.button}
-          onPress={() => Alert.alert("TBD", "Coming soon")}
+          style={[styles.button, !throwActive ? styles.disabledButton : {}]}
+          onPress={
+            !throwActive ? null : () => Alert.alert("TBD", "Coming soon")
+          }
+          disabled={!throwActive}
         >
           <Text style={styles.buttonText}>Register</Text>
         </TouchableOpacity>
       </View>
+      <Modal
+        transparent
+        animationType="fade"
+        visible={abortModalVisible}
+        onRequestClose={() => setAbortModalVisible(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalBox}>
+            <Text style={styles.modalTitle}>Abort</Text>
+            <Text style={styles.modalMessage}>What would you like to do?</Text>
+            <ScrollView>
+              {abortOptions.map((option, index) => (
+                <TouchableOpacity
+                  key={index}
+                  style={[
+                    styles.modalOption,
+                    option.cancel ? styles.modalCancel : {},
+                    option.destructive ? styles.modalDestructive : {},
+                  ]}
+                  onPress={option.onPress}
+                >
+                  <Text
+                    style={[
+                      styles.modalOptionText,
+                      option.cancel ? styles.modalCancelText : {},
+                      option.destructive ? styles.modalDestructiveText : {},
+                    ]}
+                  >
+                    {option.text}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -491,5 +650,55 @@ const styles = StyleSheet.create({
     color: "#fff",
     fontSize: 14,
     fontWeight: "bold",
+  },
+  disabledButton: {
+    backgroundColor: "#ccc",
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.5)",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  modalBox: {
+    backgroundColor: "#fff",
+    borderRadius: 12,
+    padding: 20,
+    width: "85%",
+    maxHeight: "70%",
+  },
+  modalTitle: {
+    fontSize: 18,
+    fontWeight: "bold",
+    marginBottom: 4,
+  },
+  modalMessage: {
+    fontSize: 14,
+    color: "#666",
+    marginBottom: 12,
+  },
+  modalOption: {
+    paddingVertical: 14,
+    borderBottomWidth: 1,
+    borderBottomColor: "#eee",
+  },
+  modalOptionText: {
+    fontSize: 16,
+    textAlign: "left",
+  },
+  modalCancel: {
+    borderBottomWidth: 0,
+    marginTop: 4,
+  },
+  modalCancelText: {
+    color: "#007AFF",
+    fontWeight: "bold",
+  },
+  modalDestructive: {},
+  modalDestructiveText: {
+    color: "#FF3B30",
+  },
+  cardContainerLocked: {
+    opacity: 0.4,
   },
 });

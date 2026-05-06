@@ -585,6 +585,14 @@ export const scoringOngoing = async (courseName, roundNo, holeNo) => {
   return !!result;
 };
 
+export const getHolePerRoundByHoleNo = async (courseName, roundNo, holeNo) => {
+  const db = await dbPromise;
+  return await db.getFirstAsync(
+    "SELECT * FROM HolesPerRound WHERE course_name = ? AND round_no = ? AND hole_no = ?;",
+    [courseName, roundNo, holeNo],
+  );
+};
+
 //==============================================
 //   Throws
 //==============================================
@@ -698,4 +706,12 @@ export const hasRoundStarted = async (courseName, roundNo) => {
     [courseName, roundNo],
   );
   return !!result;
+};
+
+export const getThrowsForHole = async (courseName, roundNo, holeNo) => {
+  const db = await dbPromise;
+  return await db.getAllAsync(
+    "SELECT * FROM Throws WHERE course_name = ? AND round_no = ? AND hole_no = ? ORDER BY throw_no ASC;",
+    [courseName, roundNo, holeNo],
+  );
 };
