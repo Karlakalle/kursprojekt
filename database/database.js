@@ -341,7 +341,7 @@ export const getNextRoundNo = async (courseName) => {
     "SELECT MAX(round_no) AS max_no FROM Rounds WHERE course_name = ?;",
     [courseName],
   );
-  return (result?.max_no ?? -1) + 1;
+  return (result?.max_no ?? 0) + 1;
 };
 
 export const saveRound = async (round) => {
@@ -416,6 +416,23 @@ export const getMeanDuration = async (courseName) => {
     .padStart(2, "0");
   const minutes = (totalMinutes % 60).toString().padStart(2, "0");
   return `${hours}:${minutes}`;
+};
+
+//-- Scoring -----------------------------------
+export const getOngoingRound = async (courseName) => {
+  const db = await dbPromise;
+  const round = await db.getFirstAsync(
+    "SELECT * FROM Rounds WHERE course_name = ? AND aborted = 0 AND full_round = 0 ORDER BY round_no ASC;",
+    [courseName],
+  );
+  if (round) return round;
+  // No ongoing round — create a new one
+  const nextNo = await getNextRoundNo(courseName);
+  await db.runAsync(
+    "INSERT INTO Rounds (course_name, round_no, aborted, full_round) VALUES (?, ?, 0, 0);",
+    [courseName, nextNo],
+  );
+  return await getRound(courseName, nextNo);
 };
 
 //==============================================
@@ -518,6 +535,35 @@ export const deleteHolesPerRound = async (courseName, roundNo) => {
     "DELETE FROM HolesPerRound WHERE course_name = ? AND round_no = ?;",
     [courseName, roundNo],
   );
+};
+
+//-- Scoring -----------------------------------
+export const getHolesToScore = async (courseName, roundNo) => {
+  const db = await dbPromise;
+  return await db.getAllAsync(
+    `SELECT h.* FROM Holes h
+     WHERE h.course_name = ?
+     AND NOT EXISTS (
+       SELECT 1 FROM HolesPerRound hpr
+       WHERE hpr.course_name = h.course_name
+         AND hpr.round_no = ?
+         AND hpr.hole_no = h.hole_no
+         AND (hpr.aborted = 1 OR hpr.hole_scored = 1)
+     )
+     ORDER BY h.hole_no ASC;`,
+    [courseName, roundNo],
+  );
+};
+
+export const isHoleScored = async (courseName, roundNo, holeNo) => {
+  const db = await dbPromise;
+  const result = await db.getFirstAsync(
+    `SELECT 1 FROM HolesPerRound
+     WHERE course_name = ? AND round_no = ? AND hole_no = ?
+       AND (aborted = 1 OR hole_scored = 1);`,
+    [courseName, roundNo, holeNo],
+  );
+  return !!result;
 };
 
 //==============================================

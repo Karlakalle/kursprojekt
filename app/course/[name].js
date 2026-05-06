@@ -19,6 +19,7 @@ import {
   getHoleQty,
   getLatestDate,
   getMeanDuration,
+  getOngoingRound, //Scoring
 } from "../../database/database";
 import * as Location from "expo-location";
 
@@ -140,9 +141,16 @@ export default function CoursePage() {
   };
   */
 
-  const handleStart = () => {
-    Alert.alert("TBD", "Start feature coming soon");
+  //-- Scoring -----------------------------------
+  const handleStart = async () => {
+    try {
+      const round = await getOngoingRound(course.name);
+      router.push(`/scoring/${encodeURIComponent(course.name)}`);
+    } catch (e) {
+      Alert.alert("Error", "Failed to start round.");
+    }
   };
+  //----------------------------------------------
 
   const handleHoleInfo = () => {
     router.push(`/holes/${encodeURIComponent(course.name)}`);

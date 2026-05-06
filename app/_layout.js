@@ -19,6 +19,10 @@ export default function Layout() {
         name="holes/[courseName]/[holeNo]"
         options={{ title: "Hole Details" }}
       />
+      <Stack.Screen
+        name="scoring/[courseName]"
+        options={{ title: "Scoring" }}
+      />
       <StatusBar style="auto" />
     </Stack>
   );
