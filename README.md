@@ -2,14 +2,15 @@
 **Uses Expo verion 54.**
 
 ## To run (I tested this myself):
-1) Install dependencies: ```npm install --legacy-peer-deps```
+1) Install dependencies: ```npm install```
 2) Start the app: ```npx expo start```
 
 ## Functionality:
-1) Welcome page is displayed for about 2 seconds.
-2) Scrollable Flatlist displaying a list of the parliament members, only an image and the name.
-3) Selecting a specific person opens a new page containing details like birthday and address of the person.
-4) Filter/Search field not implemented.
+1) "Course List" page. Scrollable list of courses. Basic information displayed for each course. Possibility to add a new course. Selecting button "Add New" routes you to the "Course Details" page in edit mode. Selecting a list entry routes you to the same page in non-edit mode.
+2) "Course Details" page. Enter manually information about the course (in edit mode using the button "Edit"). From here it should be able to see/edit information about specific holes, see scoring history, start a new round via the buttons "Hole Info", "History" and "Start" respectively. In the edit mode you can get your current geo location. So when you are at the first throw-out location enter edit mode for the course and press the button "Store Geo" to get the geo location starting data for the course.
+3) The "History" button and the related page is not done.
+4) Pressing the "Hole Info" button will route you to the hole list page now called "Hole Info". This page lists all registered holes for the course. In the list is displayed basic information about each hole. It is scrollable, and in the same manner as on the "Course List" page you can see and edit data about each hole by selecting the list entry. Pressing "Add new Hole" will take you to the same page in edit mode.
+5) Pressing the "Start" button routes you to the "Scoring" page. A new round for the selected course is immediately created (if not already existing). You can select your next hol from the single-entry scroll list in the upper section. There is also a possiblity to add new holes successively. This is of course useful the first time you make the round; you don't need to enter information about all holes in advance. In the middle section current statistics is shown, "Throws", "Duration" and "Distance" (of last throw). This is updated as you throw. THere is a map that is centered at the geo position registered for the course. WHen there already are holes registered with geo location data this location data is shown on the map for the selected hole. As you throw a new line is added to the map representeing all you trows for the hole. In the bottom section there are three buttons. The "Abort" button allows you to skip the onging hole, restart the ongoing hole, abort the round and either save data or discard data for the round. When you throw out you press "Throw" and the geo location is stored. When you press "Register" the geo location of the landing point is stored. When you press "Register" it is also possible that you scored the hole or that even the hole round finished, so additonal questions pop up when you press "Register". When the round is finished you are routed to a new page called "Scoreboard" where you can see statistics about the round.
 
 ## Usage of AI:
 Most of the code is AI. I have checked the code, trying to learn from it.
