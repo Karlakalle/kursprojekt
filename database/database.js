@@ -316,6 +316,14 @@ export const getHoleQty = async (courseName) => {
   return result?.max_hole ?? 0;
 };
 
+export const getHoleGeo = async (courseName, holeNo) => {
+  const db = await dbPromise;
+  return await db.getFirstAsync(
+    "SELECT lat_start, lon_start, lat_finish, lon_finish FROM Holes WHERE course_name = ? AND hole_no = ?;",
+    [courseName, holeNo],
+  );
+};
+
 //==============================================
 //   Rounds
 //==============================================
@@ -566,6 +574,17 @@ export const isHoleScored = async (courseName, roundNo, holeNo) => {
   return !!result;
 };
 
+export const scoringOngoing = async (courseName, roundNo, holeNo) => {
+  const db = await dbPromise;
+  const result = await db.getFirstAsync(
+    `SELECT 1 FROM HolesPerRound
+     WHERE course_name = ? AND round_no = ? AND hole_no = ?
+       AND hole_scored = 0 AND aborted = 0;`,
+    [courseName, roundNo, holeNo],
+  );
+  return !!result;
+};
+
 //==============================================
 //   Throws
 //==============================================
@@ -669,4 +688,14 @@ export const deleteThrowsForRound = async (courseName, roundNo) => {
     "DELETE FROM Throws WHERE course_name = ? AND round_no = ?;",
     [courseName, roundNo],
   );
+};
+
+//-- Scoring -----------------------------------
+export const hasRoundStarted = async (courseName, roundNo) => {
+  const db = await dbPromise;
+  const result = await db.getFirstAsync(
+    "SELECT 1 FROM Throws WHERE course_name = ? AND round_no = ?;",
+    [courseName, roundNo],
+  );
+  return !!result;
 };
