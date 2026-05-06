@@ -23,6 +23,10 @@ export default function Layout() {
         name="scoring/[courseName]"
         options={{ title: "Scoring" }}
       />
+      <Stack.Screen
+        name="scoreboard/[courseName]/[roundNo]"
+        options={{ title: "Scoreboard" }}
+      />
       <StatusBar style="auto" />
     </Stack>
   );

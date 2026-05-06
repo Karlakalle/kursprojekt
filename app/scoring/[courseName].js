@@ -37,6 +37,13 @@ import {
   getThrows,
   getRound,
   getHolePerRoundByHoleNo,
+  updateThrowFinish,
+  updateHolePerRoundFinish,
+  recalculateHoleStats,
+  wrapUpRound,
+  hasAllHolesScored,
+  getHolesPerRoundScoreboard,
+  getThrow,
 } from "../../database/database";
 import MapView, { Marker, Polyline } from "react-native-maps";
 import * as Location from "expo-location";
@@ -66,6 +73,8 @@ export default function ScoringPage() {
 
   const [abortModalVisible, setAbortModalVisible] = useState(false);
   const [abortOptions, setAbortOptions] = useState([]);
+
+  const [throwLines, setThrowLines] = useState([]);
 
   useFocusEffect(
     React.useCallback(() => {
@@ -184,6 +193,19 @@ export default function ScoringPage() {
     } catch (e) {
       console.error("Failed to refresh scoring page", e);
     }
+  };
+
+  const calcDistance = (lat1, lon1, lat2, lon2) => {
+    const R = 6371000;
+    const dLat = ((lat2 - lat1) * Math.PI) / 180;
+    const dLon = ((lon2 - lon1) * Math.PI) / 180;
+    const a =
+      Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+      Math.cos((lat1 * Math.PI) / 180) *
+        Math.cos((lat2 * Math.PI) / 180) *
+        Math.sin(dLon / 2) *
+        Math.sin(dLon / 2);
+    return Math.round(R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a)));
   };
 
   const handleAbort = async () => {
@@ -379,6 +401,146 @@ export default function ScoringPage() {
     }
   };
 
+  const handleRegister = async () => {
+    setThrowActive(false);
+
+    // Get GPS position (optional)
+    let lat = 0;
+    let lon = 0;
+    try {
+      const { status } = await Location.requestForegroundPermissionsAsync();
+      if (status === "granted") {
+        const pos = await Location.getCurrentPositionAsync({
+          accuracy: Location.Accuracy.BestForNavigation,
+        });
+        lat = pos.coords.latitude;
+        lon = pos.coords.longitude;
+      }
+    } catch (e) {}
+
+    const now = new Date().toISOString();
+
+    // Ask "Did you score?"
+    const scored = await new Promise((resolve) => {
+      Alert.alert("Did you score?", "", [
+        { text: "No", onPress: () => resolve(false) },
+        { text: "Yes", onPress: () => resolve(true) },
+      ]);
+    });
+
+    // Check if all holes scored (only if scored)
+    let wrapUp = false;
+    if (scored) {
+      const allScored = await hasAllHolesScored(decoded, round.round_no);
+      if (allScored) {
+        wrapUp = await new Promise((resolve) => {
+          Alert.alert("Wrap up Round?", "", [
+            { text: "No", onPress: () => resolve(false) },
+            { text: "Yes", onPress: () => resolve(true) },
+          ]);
+        });
+      }
+    }
+
+    // Update Throws record
+    await updateThrowFinish(
+      decoded,
+      round.round_no,
+      selectedHoleNo,
+      activeThrowNo,
+      now,
+      lat,
+      lon,
+    );
+
+    // Update throw lines on map
+    const currentThrow = await getThrow(
+      decoded,
+      round.round_no,
+      selectedHoleNo,
+      activeThrowNo,
+    );
+    if (
+      currentThrow &&
+      currentThrow.lat_start !== 0 &&
+      currentThrow.lon_start !== 0 &&
+      lat !== 0 &&
+      lon !== 0
+    ) {
+      setThrowLines((prev) => [
+        ...prev,
+        {
+          start: {
+            latitude: currentThrow.lat_start,
+            longitude: currentThrow.lon_start,
+          },
+          finish: { latitude: lat, longitude: lon },
+        },
+      ]);
+    }
+
+    // Update stats
+    const holeStartTime = (
+      await getHolePerRoundByHoleNo(decoded, round.round_no, selectedHoleNo)
+    )?.start_time;
+    if (holeStartTime) {
+      const ms = new Date(now) - new Date(holeStartTime);
+      const mins = Math.floor(ms / 60000);
+      const h = Math.floor(mins / 60)
+        .toString()
+        .padStart(2, "0");
+      const m = (mins % 60).toString().padStart(2, "0");
+      setTimeSpent(`${h}:${m}`);
+    }
+
+    if (
+      lat !== 0 &&
+      lon !== 0 &&
+      currentThrow?.lat_start !== 0 &&
+      currentThrow?.lon_start !== 0
+    ) {
+      const dist = calcDistance(
+        currentThrow.lat_start,
+        currentThrow.lon_start,
+        lat,
+        lon,
+      );
+      setLastThrowDistance(dist);
+    }
+
+    if (scored) {
+      // Update HolesPerRound
+      await updateHolePerRoundFinish(
+        decoded,
+        round.round_no,
+        selectedHoleNo,
+        now,
+        lat,
+        lon,
+        throwCount,
+        true,
+      );
+
+      // Recalculate hole stats
+      await recalculateHoleStats(decoded, selectedHoleNo);
+
+      // Unlock scroll
+      setScrollLocked(false);
+      setThrowCount(0);
+      setLastThrowDistance(null);
+      setTimeSpent("00:00");
+      setThrowLines([]);
+      await refreshScoringPage();
+    }
+
+    if (wrapUp) {
+      await wrapUpRound(decoded, round.round_no);
+      router.replace(
+        `/scoreboard/${encodeURIComponent(decoded)}/${round.round_no}`,
+      );
+    }
+  };
+
   return (
     <SafeAreaView style={styles.container}>
       {/* ── Upper Section: List ── */}
@@ -453,6 +615,14 @@ export default function ScoringPage() {
                     />
                   </>
                 )}
+              {throwLines.map((line, index) => (
+                <Polyline
+                  key={`throw-${index}`}
+                  coordinates={[line.start, line.finish]}
+                  strokeColor="#007AFF"
+                  strokeWidth={2}
+                />
+              ))}
             </MapView>
             <View style={styles.statsRow}>
               <Text style={styles.statText}>🥏 {throwCount} throws</Text>
@@ -495,9 +665,7 @@ export default function ScoringPage() {
         </TouchableOpacity>
         <TouchableOpacity
           style={[styles.button, !throwActive ? styles.disabledButton : {}]}
-          onPress={
-            !throwActive ? null : () => Alert.alert("TBD", "Coming soon")
-          }
+          onPress={!throwActive ? null : handleRegister}
           disabled={!throwActive}
         >
           <Text style={styles.buttonText}>Register</Text>

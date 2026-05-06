@@ -324,6 +324,57 @@ export const getHoleGeo = async (courseName, holeNo) => {
   );
 };
 
+//-- Scoring -----------------------------------
+export const recalculateHoleStats = async (courseName, holeNo) => {
+  const db = await dbPromise;
+  const hole = await getHole(courseName, holeNo);
+  if (!hole) return;
+  const records = await db.getAllAsync(
+    `SELECT * FROM HolesPerRound WHERE course_name = ? AND hole_no = ? AND hole_scored = 1;`,
+    [courseName, holeNo],
+  );
+  if (records.length === 0) return;
+
+  const count = records.length;
+  const meanThrows = records.reduce((s, r) => s + (r.throws ?? 0), 0) / count;
+  const parPlusMinus = meanThrows - hole.par;
+  const meanLatStart =
+    records.reduce((s, r) => s + (r.lat_start ?? 0), 0) / count;
+  const meanLonStart =
+    records.reduce((s, r) => s + (r.lon_start ?? 0), 0) / count;
+  const meanLatFinish =
+    records.reduce((s, r) => s + (r.lat_finish ?? 0), 0) / count;
+  const meanLonFinish =
+    records.reduce((s, r) => s + (r.lon_finish ?? 0), 0) / count;
+  const meanDurationMs =
+    records.reduce((s, r) => {
+      if (!r.start_time || !r.end_time) return s;
+      return s + (new Date(r.end_time) - new Date(r.start_time));
+    }, 0) / count;
+  const totalMinutes = Math.floor(meanDurationMs / 60000);
+  const hours = Math.floor(totalMinutes / 60)
+    .toString()
+    .padStart(2, "0");
+  const minutes = (totalMinutes % 60).toString().padStart(2, "0");
+  const estimatedDuration = `${hours}:${minutes}`;
+
+  await db.runAsync(
+    `UPDATE Holes SET par_plus_minus = ?, lat_start = ?, lon_start = ?,
+     lat_finish = ?, lon_finish = ?, estimated_duration = ?
+     WHERE course_name = ? AND hole_no = ?;`,
+    [
+      parPlusMinus,
+      meanLatStart,
+      meanLonStart,
+      meanLatFinish,
+      meanLonFinish,
+      estimatedDuration,
+      courseName,
+      holeNo,
+    ],
+  );
+};
+
 //==============================================
 //   Rounds
 //==============================================
@@ -593,6 +644,52 @@ export const getHolePerRoundByHoleNo = async (courseName, roundNo, holeNo) => {
   );
 };
 
+export const hasAllHolesScored = async (courseName, roundNo) => {
+  const holes = await getHolesToScore(courseName, roundNo);
+  return holes.length === 0;
+};
+
+export const updateHolePerRoundFinish = async (
+  courseName,
+  roundNo,
+  holeNo,
+  endTime,
+  latFinish,
+  lonFinish,
+  throws,
+  holeScored,
+) => {
+  const db = await dbPromise;
+  const hpr = await getHolePerRoundByHoleNo(courseName, roundNo, holeNo);
+  if (!hpr) return;
+  await db.runAsync(
+    `UPDATE HolesPerRound SET end_time = ?, lat_finish = ?, lon_finish = ?,
+     throws = ?, hole_scored = ? WHERE course_name = ? AND round_no = ? AND order_no = ?;`,
+    [
+      endTime,
+      latFinish,
+      lonFinish,
+      throws,
+      holeScored ? 1 : 0,
+      courseName,
+      roundNo,
+      hpr.order_no,
+    ],
+  );
+};
+
+export const getHolesPerRoundScoreboard = async (courseName, roundNo) => {
+  const db = await dbPromise;
+  return await db.getAllAsync(
+    `SELECT hpr.*, h.name, h.par, h.distance
+     FROM HolesPerRound hpr
+     LEFT JOIN Holes h ON h.course_name = hpr.course_name AND h.hole_no = hpr.hole_no
+     WHERE hpr.course_name = ? AND hpr.round_no = ?
+     ORDER BY hpr.order_no ASC;`,
+    [courseName, roundNo],
+  );
+};
+
 //==============================================
 //   Throws
 //==============================================
@@ -713,5 +810,42 @@ export const getThrowsForHole = async (courseName, roundNo, holeNo) => {
   return await db.getAllAsync(
     "SELECT * FROM Throws WHERE course_name = ? AND round_no = ? AND hole_no = ? ORDER BY throw_no ASC;",
     [courseName, roundNo, holeNo],
+  );
+};
+
+export const updateThrowFinish = async (
+  courseName,
+  roundNo,
+  holeNo,
+  throwNo,
+  endTime,
+  latFinish,
+  lonFinish,
+) => {
+  const db = await dbPromise;
+  await db.runAsync(
+    `UPDATE Throws SET end_time = ?, lat_finish = ?, lon_finish = ?
+     WHERE course_name = ? AND round_no = ? AND hole_no = ? AND throw_no = ?;`,
+    [endTime, latFinish, lonFinish, courseName, roundNo, holeNo, throwNo],
+  );
+};
+
+export const wrapUpRound = async (courseName, roundNo) => {
+  const db = await dbPromise;
+  const now = new Date().toISOString();
+  const throws = await db.getFirstAsync(
+    "SELECT COUNT(*) AS total FROM Throws WHERE course_name = ? AND round_no = ?;",
+    [courseName, roundNo],
+  );
+  const totalThrows = throws?.total ?? 0;
+  const abortedHole = await db.getFirstAsync(
+    "SELECT 1 FROM HolesPerRound WHERE course_name = ? AND round_no = ? AND aborted = 1;",
+    [courseName, roundNo],
+  );
+  const aborted = !!abortedHole;
+  await db.runAsync(
+    `UPDATE Rounds SET end_time = ?, total_throws = ?, aborted = ?, full_round = ?
+     WHERE course_name = ? AND round_no = ?;`,
+    [now, totalThrows, aborted ? 1 : 0, aborted ? 0 : 1, courseName, roundNo],
   );
 };
